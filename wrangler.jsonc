@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trip-planner",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  // Preview URLs would bypass the Access rule on workers.dev, so keep them off.
+  "preview_urls": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trip-planner",
+      // Replace with the id printed by `npx wrangler d1 create trip-planner`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Your Zero Trust team domain, e.g. "myteam.cloudflareaccess.com".
+    "ACCESS_TEAM_DOMAIN": "",
+    // The "Application Audience (AUD) Tag" of the Access application.
+    "ACCESS_AUD": ""
+  }
+}
