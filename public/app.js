@@ -1,4 +1,3 @@
-const CATEGORIES = { see: "To see", do: "To do", eat: "To eat", stay: "To stay", other: "Other" };
 const app = document.getElementById("app");
 
 // Builds DOM nodes. Text always goes in as text nodes, never as HTML.
@@ -189,57 +188,27 @@ function renderNew() {
   app.replaceChildren(h("h1", {}, "New trip"), newTripForm());
 }
 
-function targetItem(t, rerender) {
-  return h(
-    "div",
-    { class: `card target${t.done ? " done" : ""}` },
-    h("input", {
-      type: "checkbox",
-      checked: t.done,
-      "aria-label": "Done",
-      onchange: async (e) => {
-        await api(`/targets/${t.id}`, { method: "PUT", body: { done: e.target.checked } });
-        rerender();
-      },
-    }),
-    h(
-      "div",
-      { class: "body" },
-      h("div", { class: "title" }, t.title),
-      t.location && h("div", { class: "muted" }, t.location),
-      t.url && h("div", {}, h("a", { href: t.url, target: "_blank", rel: "noopener noreferrer" }, "Link")),
-      t.notes && h("div", { class: "muted" }, t.notes),
-    ),
-    h("button", {
-      class: "link danger",
-      title: "Delete",
-      onclick: async () => {
-        if (!confirm(`Delete "${t.title}"?`)) return;
-        await api(`/targets/${t.id}`, { method: "DELETE" });
-        rerender();
-      },
-    }, "✕"),
-  );
+// --- Sights (targets) ---
+
+function fmtVisit(v) {
+  return new Date(v).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-async function renderTrip(id) {
-  const trip = await api(`/trips/${id}`);
-  const rerender = () => renderTrip(id).catch(showError);
+function mapsLink(place) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+}
 
-  const groups = Object.entries(CATEGORIES)
-    .map(([key, label]) => [label, trip.targets.filter((t) => t.category === key)])
-    .filter(([, items]) => items.length);
-
+function sightForm(sight = {}, onSubmit, submitLabel, onCancel) {
   const err = h("p", { class: "error" });
-  const addForm = h(
+  const field = (label, input, hint) => h("label", {}, h("span", {}, label, hint && h("span", { class: "optional" }, ` ${hint}`)), input);
+  const form = h(
     "form",
     {
       class: "stack card",
       onsubmit: async (e) => {
         e.preventDefault();
         try {
-          await api(`/trips/${id}/targets`, { method: "POST", body: formData(addForm) });
-          rerender();
+          await onSubmit(formData(form));
         } catch (x) {
           err.textContent = x.message;
         }
@@ -248,38 +217,129 @@ async function renderTrip(id) {
     h(
       "div",
       { class: "grid2" },
-      h("label", {}, "What", h("input", { name: "title", required: true, placeholder: "Belém Tower" })),
-      h("label", {}, "Type", h("select", { name: "category" }, Object.entries(CATEGORIES).map(([k, v]) => h("option", { value: k }, v)))),
+      field("Name", h("input", { name: "title", required: true, value: sight.title || "", placeholder: "Belém Tower" })),
+      field("Location", h("input", { name: "location", required: true, value: sight.location || "", placeholder: "Av. Brasília, Lisbon" })),
+    ),
+    field("How to get there", h("textarea", { name: "directions", required: true, rows: 2, value: sight.directions || "", placeholder: "Tram 15E from Praça da Figueira to Belém, ~25 min" })),
+    h(
+      "div",
+      { class: "grid2" },
+      field("Ticket prices", h("textarea", { name: "tickets", required: true, rows: 2, value: sight.tickets || "", placeholder: "Adult €10, under 12 free" })),
+      field("Visiting hours", h("textarea", { name: "hours", required: true, rows: 2, value: sight.hours || "", placeholder: "Tue–Sun 10:00–18:30, closed Mon" })),
     ),
     h(
       "div",
       { class: "grid2" },
-      h("label", {}, "Where", h("input", { name: "location", placeholder: "Address or area" })),
-      h("label", {}, "Link", h("input", { name: "url", type: "url", placeholder: "https://…" })),
+      field("Website", h("input", { name: "url", type: "url", value: sight.url || "", placeholder: "https://…" }), "(optional)"),
+      field("Visit appointment", h("input", { name: "visit_at", type: "datetime-local", value: sight.visit_at || "" }), "(optional)"),
     ),
-    h("label", {}, "Notes", h("textarea", { name: "notes" })),
     err,
-    h("div", { class: "row" }, h("button", { class: "primary" }, "Add target")),
+    h(
+      "div",
+      { class: "row" },
+      h("button", { class: "primary" }, submitLabel),
+      onCancel && h("button", { type: "button", onclick: onCancel }, "Cancel"),
+    ),
   );
+  return form;
+}
 
-  const done = trip.targets.filter((t) => t.done).length;
-  const when = countdown(trip);
+function sightCard(t, rerender) {
+  const detail = (label, value) => value && h("div", { class: "detail" }, h("dt", {}, label), h("dd", {}, value));
+  const card = h(
+    "article",
+    { class: `card sight${t.done ? " done" : ""}` },
+    h(
+      "header",
+      { class: "sight-head" },
+      h("input", {
+        type: "checkbox",
+        checked: t.done,
+        title: "Visited",
+        "aria-label": "Visited",
+        onchange: async (e) => {
+          await api(`/targets/${t.id}`, { method: "PUT", body: { done: e.target.checked } });
+          rerender();
+        },
+      }),
+      h("h3", { class: "title" }, t.title),
+      t.visit_at && h("span", { class: "pill accent" }, `Booked ${fmtVisit(t.visit_at)}`),
+      h(
+        "div",
+        { class: "actions" },
+        h("button", { class: "link", onclick: () => card.replaceWith(editForm()) }, "Edit"),
+        h("button", {
+          class: "link danger",
+          title: "Delete",
+          onclick: async () => {
+            if (!confirm(`Delete "${t.title}"?`)) return;
+            await api(`/targets/${t.id}`, { method: "DELETE" });
+            rerender();
+          },
+        }, "Delete"),
+      ),
+    ),
+    h(
+      "dl",
+      { class: "details" },
+      detail("Location", t.location && h("a", { href: mapsLink(t.location), target: "_blank", rel: "noopener noreferrer" }, t.location)),
+      detail("How to get there", t.directions),
+      detail("Tickets", t.tickets),
+      detail("Hours", t.hours),
+      detail("Website", t.url && h("a", { href: t.url, target: "_blank", rel: "noopener noreferrer" }, new URL(t.url).hostname)),
+      detail("Notes", t.notes),
+    ),
+  );
+  const editForm = () => {
+    const form = sightForm(t, async (data) => {
+      await api(`/targets/${t.id}`, { method: "PUT", body: data });
+      rerender();
+    }, "Save", () => form.replaceWith(card));
+    return form;
+  };
+  return card;
+}
+
+function tile(label, value, sub) {
+  return h("div", { class: "tile" }, h("div", { class: "tile-label" }, label), h("div", { class: "tile-value" }, value), sub && h("div", { class: "muted small" }, sub));
+}
+
+async function renderTrip(id) {
+  const trip = await api(`/trips/${id}`);
+  const rerender = () => renderTrip(id).catch(showError);
+
+  const sights = trip.targets;
+  const visited = sights.filter((t) => t.done).length;
+  const nextVisit = sights.filter((t) => t.visit_at && !t.done).sort((a, b) => a.visit_at.localeCompare(b.visit_at))[0];
 
   app.replaceChildren(
     h("h1", {}, trip.name),
     h("div", { class: "muted" }, [trip.destination, fmtDates(trip)].filter(Boolean).join(" · ")),
-    h(
-      "div",
-      { class: "row overview" },
-      when && h("span", { class: "pill" }, when),
-      h("span", { class: "pill" }, `${done}/${trip.targets.length} targets done`),
-    ),
     trip.notes && h("p", {}, trip.notes),
-    ...(groups.length
-      ? groups.flatMap(([label, items]) => [h("h2", {}, label), ...items.map((t) => targetItem(t, rerender))])
-      : [h("p", { class: "muted" }, "No targets yet. Add places to see, things to do, where to eat or stay.")]),
-    h("h2", {}, "Add a target"),
-    addForm,
+    h(
+      "section",
+      { class: "tiles" },
+      tile("Countdown", countdown(trip) || "No dates yet", trip.start_date && fmtDates(trip)),
+      tile("Sights", String(sights.length), sights.length ? `${visited} visited` : "None added yet"),
+      tile("Next visit", nextVisit ? fmtVisit(nextVisit.visit_at) : "Nothing booked", nextVisit?.title),
+    ),
+    h(
+      "section",
+      { class: "panel" },
+      h("div", { class: "panel-head" }, h("h2", {}, "Sights & landmarks"), h("span", { class: "muted small" }, `${visited}/${sights.length} visited`)),
+      ...(sights.length
+        ? sights.map((t) => sightCard(t, rerender))
+        : [h("p", { class: "muted" }, "No sights yet. Add the landmarks you want to see on this trip.")]),
+      h(
+        "details",
+        { class: "add-sight", open: !sights.length },
+        h("summary", {}, "+ Add a sight"),
+        sightForm({}, async (data) => {
+          await api(`/trips/${id}/targets`, { method: "POST", body: { ...data, category: "see" } });
+          rerender();
+        }, "Add sight"),
+      ),
+    ),
     h(
       "details",
       {},
@@ -292,7 +352,7 @@ async function renderTrip(id) {
       h("button", {
         class: "danger",
         onclick: async () => {
-          if (!confirm(`Delete "${trip.name}" and all its targets?`)) return;
+          if (!confirm(`Delete "${trip.name}" and all its sights?`)) return;
           await api(`/trips/${id}`, { method: "DELETE" });
           await loadTrips();
           location.hash = "#/";

@@ -33,6 +33,7 @@ You need a free Cloudflare account.
 ## Later changes
 
 - New table or column: add a numbered file to `migrations/`, then `npm run db:migrate:remote`.
+- After pulling an update that adds a migration (like `0002_sight_details.sql`), run `npm run db:migrate:remote` before `npm run deploy`.
 - Code changes: `npm run deploy`.
 
 ## Troubleshooting
