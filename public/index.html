@@ -8,10 +8,18 @@
 </head>
 <body>
   <header class="top">
+    <button id="sidebar-toggle" class="icon" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar">☰</button>
     <a href="#/" class="brand">Trip Planner</a>
     <span id="me" class="me"></span>
   </header>
-  <main id="app"><p class="muted">Loading…</p></main>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar" aria-label="Trips">
+      <a href="#/new" class="new-trip">+ New trip</a>
+      <nav id="trip-nav"><p class="muted">Loading…</p></nav>
+    </aside>
+    <div id="scrim" class="scrim" hidden></div>
+    <main id="app"><p class="muted">Loading…</p></main>
+  </div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
