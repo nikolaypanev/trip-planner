@@ -80,7 +80,7 @@ async function getTrip(db, id) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").bind(id).first();
   if (!trip) throw new HttpError(404, "Trip not found");
   const { results } = await db
-    .prepare("SELECT * FROM targets WHERE trip_id = ? ORDER BY done, created_at")
+    .prepare("SELECT * FROM targets WHERE trip_id = ? ORDER BY done, (visit_at IS NULL), visit_at, created_at")
     .bind(id)
     .all();
   trip.targets = results.map(toTarget);
@@ -138,10 +138,24 @@ async function createTarget(db, tripId, body, user) {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO targets (id, trip_id, title, category, location, url, notes, done, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO targets (id, trip_id, title, category, location, directions, tickets, hours, visit_at, url, notes, done, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, tripId, t.title, t.category ?? "see", t.location ?? "", t.url ?? "", t.notes ?? "", t.done ?? 0, user.email)
+    .bind(
+      id,
+      tripId,
+      t.title,
+      t.category ?? "see",
+      t.location ?? "",
+      t.directions ?? "",
+      t.tickets ?? "",
+      t.hours ?? "",
+      t.visit_at ?? null,
+      t.url ?? "",
+      t.notes ?? "",
+      t.done ?? 0,
+      user.email,
+    )
     .run();
   return getTarget(db, id);
 }
@@ -177,6 +191,10 @@ function targetFields(body, requireTitle) {
     out.category = body.category;
   }
   if ("location" in body) out.location = text(body.location, "location", 300);
+  if ("directions" in body) out.directions = text(body.directions, "directions", 2000);
+  if ("tickets" in body) out.tickets = text(body.tickets, "tickets", 1000);
+  if ("hours" in body) out.hours = text(body.hours, "hours", 1000);
+  if ("visit_at" in body) out.visit_at = dateTime(body.visit_at, "visit_at");
   if ("url" in body) out.url = link(body.url);
   if ("notes" in body) out.notes = text(body.notes, "notes", 5000);
   if ("done" in body) {
@@ -221,6 +239,14 @@ function date(value, name) {
   if (value == null || value === "") return null;
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || isNaN(Date.parse(value))) {
     throw new HttpError(400, `${name} must be a date like 2026-05-31`);
+  }
+  return value;
+}
+
+function dateTime(value, name) {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) || isNaN(Date.parse(value))) {
+    throw new HttpError(400, `${name} must be a date and time like 2026-05-31T14:30`);
   }
   return value;
 }
