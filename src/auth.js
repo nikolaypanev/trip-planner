@@ -51,8 +51,11 @@ function getCookie(request, name) {
   return null;
 }
 
+// Accepts "myteam", "myteam.cloudflareaccess.com" or a full https:// URL.
 export function normalizeTeamDomain(value) {
-  return (value || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const host = (value || "").trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+  if (!host) return "";
+  return host.includes(".") ? host : `${host}.cloudflareaccess.com`;
 }
 
 export async function verifyAccessJwt(token, team, aud, fetchKeys = fetchAccessKeys, now = Date.now()) {
@@ -67,6 +70,13 @@ export async function verifyAccessJwt(token, team, aud, fetchKeys = fetchAccessK
     throw new AuthError(401, "Malformed token");
   }
   if (header.alg !== "RS256") throw new AuthError(401, "Unsupported token algorithm");
+  // Checked before fetching keys so a wrong ACCESS_TEAM_DOMAIN gets a message that names the right one.
+  if (payload.iss !== `https://${team}`) {
+    throw new AuthError(
+      403,
+      `Token is from a different team: this login came from ${payload.iss}, but ACCESS_TEAM_DOMAIN is "${team}"`,
+    );
+  }
 
   const jwk = await findKey(team, header.kid, fetchKeys);
   if (!jwk) throw new AuthError(401, "Unknown signing key");
@@ -88,7 +98,6 @@ export async function verifyAccessJwt(token, team, aud, fetchKeys = fetchAccessK
 
   const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!audiences.includes(aud)) throw new AuthError(403, "Token is for a different application");
-  if (payload.iss !== `https://${team}`) throw new AuthError(403, "Token is from a different team");
   const nowSec = Math.floor(now / 1000);
   if (typeof payload.exp !== "number" || payload.exp < nowSec) throw new AuthError(401, "Token expired");
   if (typeof payload.nbf === "number" && payload.nbf > nowSec + 60) throw new AuthError(401, "Token not yet valid");
@@ -109,8 +118,9 @@ async function findKey(team, kid, fetchKeys) {
 }
 
 async function fetchAccessKeys(team) {
-  const res = await fetch(`https://${team}/cdn-cgi/access/certs`);
-  if (!res.ok) throw new AuthError(503, "Could not load Access signing keys");
+  const url = `https://${team}/cdn-cgi/access/certs`;
+  const res = await fetch(url);
+  if (!res.ok) throw new AuthError(503, `Could not load Access signing keys from ${url} (HTTP ${res.status})`);
   const body = await res.json();
   return body.keys || [];
 }
