@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AuthError, getUser, verifyAccessJwt } from "../src/auth.js";
+import { AuthError, getUser, normalizeTeamDomain, verifyAccessJwt } from "../src/auth.js";
 
 const AUD = "test-aud";
 
@@ -102,4 +102,18 @@ test("a forged cookie is rejected like a forged header", async () => {
   const token = await (await makeSigner()).sign(claims(team));
   const env = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD };
   await assert.rejects(getUser(req("https://trips.example.com/api/me", null, { Cookie: `CF_Authorization=${token}` }), env, {}, signer.fetchKeys), /signature/);
+});
+
+test("team domain accepts a bare team name, a host or a URL", () => {
+  assert.equal(normalizeTeamDomain("npworks"), "npworks.cloudflareaccess.com");
+  assert.equal(normalizeTeamDomain(" NPWorks.cloudflareaccess.com "), "npworks.cloudflareaccess.com");
+  assert.equal(normalizeTeamDomain("https://npworks.cloudflareaccess.com/cdn-cgi/access/certs"), "npworks.cloudflareaccess.com");
+  assert.equal(normalizeTeamDomain(""), "");
+});
+
+test("a wrong team domain is reported with the team the login came from, before fetching keys", async () => {
+  const team = newTeam();
+  const token = await signer.sign(claims(team));
+  const neverCalled = async () => assert.fail("keys should not be fetched");
+  await assert.rejects(verifyAccessJwt(token, "wrong.cloudflareaccess.com", AUD, neverCalled), new RegExp(`came from https://${team}`));
 });
