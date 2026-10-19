@@ -71,32 +71,122 @@ function tripForm(trip = {}, onSubmit, submitLabel) {
   return form;
 }
 
-async function renderTrips() {
-  const trips = await api("/trips");
-  const list = trips.length
-    ? trips.map((t) =>
-        h(
-          "a",
-          { class: "card", href: `#/trip/${t.id}` },
-          h("div", { class: "row spread" }, h("strong", {}, t.name), h("span", { class: "pill" }, `${t.done_count}/${t.target_count} done`)),
-          h("div", { class: "muted" }, [t.destination, fmtDates(t)].filter(Boolean).join(" · ")),
-        ),
-      )
-    : [h("p", { class: "muted" }, "No trips yet. Add your first one below.")];
+// --- Sidebar ---
 
-  app.replaceChildren(
-    h("h1", {}, "Trips"),
-    ...list,
+const sidebar = document.getElementById("sidebar");
+const nav = document.getElementById("trip-nav");
+const toggle = document.getElementById("sidebar-toggle");
+const scrim = document.getElementById("scrim");
+const narrow = matchMedia("(max-width: 760px)");
+let trips = [];
+
+// Desktop remembers whether the sidebar was collapsed; on narrow screens it is a drawer that starts closed.
+function savedOpen() {
+  try {
+    return localStorage.getItem("sidebar") !== "collapsed";
+  } catch {
+    return true;
+  }
+}
+
+function setSidebar(open, remember = true) {
+  document.body.classList.toggle("sidebar-closed", !open);
+  toggle.setAttribute("aria-expanded", String(open));
+  sidebar.inert = !open;
+  scrim.hidden = !(open && narrow.matches);
+  if (remember && !narrow.matches) {
+    try {
+      localStorage.setItem("sidebar", open ? "open" : "collapsed");
+    } catch {}
+  }
+}
+
+toggle.addEventListener("click", () => setSidebar(document.body.classList.contains("sidebar-closed")));
+scrim.addEventListener("click", () => setSidebar(false));
+narrow.addEventListener("change", () => setSidebar(!narrow.matches && savedOpen(), false));
+setSidebar(!narrow.matches && savedOpen(), false);
+
+function today() {
+  return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+}
+
+function isPast(t) {
+  const last = t.end_date || t.start_date;
+  return Boolean(last && last < today());
+}
+
+function currentTripId() {
+  return location.hash.match(/^#\/trip\/([\w-]+)$/)?.[1];
+}
+
+async function loadTrips() {
+  trips = await api("/trips");
+  renderSidebar();
+}
+
+function renderSidebar() {
+  const current = currentTripId();
+  const item = (t) =>
     h(
-      "details",
-      { open: !trips.length },
-      h("summary", {}, "New trip"),
-      tripForm({}, async (data) => {
-        const trip = await api("/trips", { method: "POST", body: data });
-        location.hash = `#/trip/${trip.id}`;
-      }, "Create trip"),
-    ),
+      "a",
+      { class: "nav-trip", href: `#/trip/${t.id}`, "aria-current": t.id === current ? "page" : null },
+      h("span", { class: "name" }, t.name),
+      h("span", { class: "muted small" }, [t.destination, fmtDates(t)].filter(Boolean).join(" · ")),
+    );
+  const upcoming = trips.filter((t) => !isPast(t));
+  const past = trips.filter(isPast).reverse();
+  nav.replaceChildren(
+    ...[
+      trips.length === 0 && h("p", { class: "muted small" }, "No trips yet."),
+      upcoming.length > 0 && h("h3", {}, "Upcoming"),
+      ...upcoming.map(item),
+      past.length > 0 && h("h3", {}, "Past"),
+      ...past.map(item),
+    ].filter(Boolean),
   );
+}
+
+// --- Main area ---
+
+function daysUntil(d) {
+  const [y, m, day] = d.split("-").map(Number);
+  const [ty, tm, td] = today().split("-").map(Number);
+  return Math.round((Date.UTC(y, m - 1, day) - Date.UTC(ty, tm - 1, td)) / 86400000);
+}
+
+function countdown(t) {
+  if (!t.start_date) return null;
+  const n = daysUntil(t.start_date);
+  if (n > 1) return `In ${n} days`;
+  if (n === 1) return "Tomorrow";
+  if (n === 0) return "Starts today";
+  return isPast(t) ? "Finished" : "Happening now";
+}
+
+function newTripForm() {
+  return tripForm({}, async (data) => {
+    const trip = await api("/trips", { method: "POST", body: data });
+    await loadTrips();
+    location.hash = `#/trip/${trip.id}`;
+  }, "Create trip");
+}
+
+async function renderHome() {
+  await tripsReady;
+  const next = trips.find((t) => !isPast(t)) || trips[0];
+  if (next) {
+    location.replace(`#/trip/${next.id}`);
+    return;
+  }
+  app.replaceChildren(
+    h("h1", {}, "Plan your first trip"),
+    h("p", { class: "muted" }, "Add a trip and it will show up in the sidebar. Everything about it lives here."),
+    newTripForm(),
+  );
+}
+
+function renderNew() {
+  app.replaceChildren(h("h1", {}, "New trip"), newTripForm());
 }
 
 function targetItem(t, rerender) {
@@ -172,10 +262,18 @@ async function renderTrip(id) {
     h("div", { class: "row" }, h("button", { class: "primary" }, "Add target")),
   );
 
+  const done = trip.targets.filter((t) => t.done).length;
+  const when = countdown(trip);
+
   app.replaceChildren(
-    h("a", { href: "#/" }, "← All trips"),
     h("h1", {}, trip.name),
     h("div", { class: "muted" }, [trip.destination, fmtDates(trip)].filter(Boolean).join(" · ")),
+    h(
+      "div",
+      { class: "row overview" },
+      when && h("span", { class: "pill" }, when),
+      h("span", { class: "pill" }, `${done}/${trip.targets.length} targets done`),
+    ),
     trip.notes && h("p", {}, trip.notes),
     ...(groups.length
       ? groups.flatMap(([label, items]) => [h("h2", {}, label), ...items.map((t) => targetItem(t, rerender))])
@@ -188,6 +286,7 @@ async function renderTrip(id) {
       h("summary", {}, "Edit trip"),
       tripForm(trip, async (data) => {
         await api(`/trips/${id}`, { method: "PUT", body: data });
+        await loadTrips();
         rerender();
       }, "Save changes"),
       h("button", {
@@ -195,6 +294,7 @@ async function renderTrip(id) {
         onclick: async () => {
           if (!confirm(`Delete "${trip.name}" and all its targets?`)) return;
           await api(`/trips/${id}`, { method: "DELETE" });
+          await loadTrips();
           location.hash = "#/";
         },
       }, "Delete trip"),
@@ -203,10 +303,15 @@ async function renderTrip(id) {
 }
 
 function router() {
-  const m = location.hash.match(/^#\/trip\/([\w-]+)$/);
-  (m ? renderTrip(m[1]) : renderTrips()).catch(showError);
+  if (narrow.matches) setSidebar(false, false);
+  renderSidebar();
+  const id = currentTripId();
+  const page = id ? renderTrip(id) : location.hash === "#/new" ? renderNew() : renderHome();
+  Promise.resolve(page).catch(showError);
 }
 
+const tripsReady = loadTrips();
+tripsReady.catch((err) => nav.replaceChildren(h("p", { class: "error small" }, err.message)));
 window.addEventListener("hashchange", router);
 api("/me")
   .then((me) => (document.getElementById("me").textContent = me.email))
