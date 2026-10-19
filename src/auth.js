@@ -1,6 +1,9 @@
-// Identifies the signed-in user from the token Cloudflare Access adds to every
-// request it lets through. The token is verified here too, so the API stays
-// closed even if someone reaches the Worker by a URL Access doesn't cover.
+// Identifies the signed-in user. Cloudflare Access checks the login before a
+// request reaches the Worker; depending on how Access was turned on, it hands
+// the identity over as `ctx.access`, as the Cf-Access-Jwt-Assertion header, or
+// only as the browser's CF_Authorization cookie. Tokens are verified here too,
+// so the API stays closed even if someone reaches the Worker by a URL Access
+// doesn't cover.
 
 export class AuthError extends Error {
   constructor(status, message) {
@@ -13,10 +16,17 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const keyCache = new Map(); // team domain -> { keys, fetchedAt }
 const KEY_TTL_MS = 60 * 60 * 1000;
 
-export async function getUser(request, env, fetchKeys = fetchAccessKeys) {
+export async function getUser(request, env, ctx, fetchKeys = fetchAccessKeys) {
   // Local development: `.dev.vars` sets DEV_USER_EMAIL. Honoured only on localhost.
   if (env.DEV_USER_EMAIL && LOCAL_HOSTS.has(new URL(request.url).hostname)) {
     return { email: env.DEV_USER_EMAIL };
+  }
+
+  // Worker-level Access ("Enable Cloudflare Access" on the Worker) provides the
+  // identity directly. The platform sets this, so it needs no verification.
+  if (ctx?.access) {
+    const identity = await ctx.access.getIdentity();
+    if (identity?.email) return { email: identity.email.toLowerCase() };
   }
 
   const team = normalizeTeamDomain(env.ACCESS_TEAM_DOMAIN);
@@ -24,12 +34,21 @@ export async function getUser(request, env, fetchKeys = fetchAccessKeys) {
     throw new AuthError(500, "Cloudflare Access is not configured for this app");
   }
 
-  const token = request.headers.get("Cf-Access-Jwt-Assertion");
+  const token = request.headers.get("Cf-Access-Jwt-Assertion") || getCookie(request, "CF_Authorization");
   if (!token) throw new AuthError(401, "Not signed in");
 
   const payload = await verifyAccessJwt(token, team, env.ACCESS_AUD, fetchKeys);
   if (!payload.email) throw new AuthError(403, "Token has no email");
   return { email: payload.email.toLowerCase() };
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get("Cookie") || "";
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return null;
 }
 
 export function normalizeTeamDomain(value) {

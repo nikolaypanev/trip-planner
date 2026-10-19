@@ -3,12 +3,12 @@ import { AuthError, getUser } from "./auth.js";
 const CATEGORIES = ["see", "do", "eat", "stay", "other"];
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
-      const user = await getUser(request, env);
+      const user = await getUser(request, env, ctx);
       return await route(request, env, url, user);
     } catch (err) {
       if (err instanceof AuthError || err instanceof HttpError) {
