@@ -34,3 +34,9 @@ You need a free Cloudflare account.
 
 - New table or column: add a numbered file to `migrations/`, then `npm run db:migrate:remote`.
 - Code changes: `npm run deploy`.
+
+## Troubleshooting
+
+- **"Not signed in"**: the request reached the app without a Cloudflare Access login. Open the app at the exact `workers.dev` URL that Access protects, sign in with the emailed code, and reload. If it persists, check that Access is enabled for **production** (not only previews) under *Settings → Domains & Routes*.
+- **"Cloudflare Access is not configured"**: `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is empty in `wrangler.jsonc`. Fill both in (step 6) and deploy again.
+- **"Token is for a different application"**: `ACCESS_AUD` doesn't match the AUD tag shown in the Access dialog.

@@ -27,21 +27,21 @@ let n = 0;
 const newTeam = () => `team${++n}.cloudflareaccess.com`;
 const claims = (team, extra = {}) => ({ aud: [AUD], iss: `https://${team}`, email: "Ana@Example.com", exp: later(), ...extra });
 
-function req(url, token) {
-  return new Request(url, { headers: token ? { "Cf-Access-Jwt-Assertion": token } : {} });
+function req(url, token, headers = {}) {
+  return new Request(url, { headers: token ? { "Cf-Access-Jwt-Assertion": token, ...headers } : headers });
 }
 
 test("accepts a valid Access token and returns the lowercased email", async () => {
   const team = newTeam();
   const token = await signer.sign(claims(team));
-  const user = await getUser(req("https://trips.example.com/api/me", token), { ACCESS_TEAM_DOMAIN: `https://${team}/`, ACCESS_AUD: AUD }, signer.fetchKeys);
+  const user = await getUser(req("https://trips.example.com/api/me", token), { ACCESS_TEAM_DOMAIN: `https://${team}/`, ACCESS_AUD: AUD }, undefined, signer.fetchKeys);
   assert.equal(user.email, "ana@example.com");
 });
 
 test("rejects requests with no token", async () => {
   const team = newTeam();
   await assert.rejects(
-    getUser(req("https://trips.example.com/api/me"), { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD }, signer.fetchKeys),
+    getUser(req("https://trips.example.com/api/me"), { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD }, undefined, signer.fetchKeys),
     (e) => e instanceof AuthError && e.status === 401,
   );
 });
@@ -81,4 +81,25 @@ test("dev bypass works on localhost only", async () => {
   const env = { DEV_USER_EMAIL: "dev@example.com" };
   assert.equal((await getUser(req("http://localhost:8787/api/me"), env)).email, "dev@example.com");
   await assert.rejects(getUser(req("https://trips.example.com/api/me"), env), (e) => e.status === 500);
+});
+
+test("uses the identity from Worker-level Access when present", async () => {
+  const ctx = { access: { aud: "x", getIdentity: async () => ({ email: "Bo@Example.com" }) } };
+  const user = await getUser(req("https://trip-planner.me.workers.dev/api/me"), {}, ctx);
+  assert.equal(user.email, "bo@example.com");
+});
+
+test("falls back to the CF_Authorization cookie when the header is missing", async () => {
+  const team = newTeam();
+  const token = await signer.sign(claims(team));
+  const env = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD };
+  const user = await getUser(req("https://trips.example.com/api/me", null, { Cookie: `theme=dark; CF_Authorization=${token}` }), env, {}, signer.fetchKeys);
+  assert.equal(user.email, "ana@example.com");
+});
+
+test("a forged cookie is rejected like a forged header", async () => {
+  const team = newTeam();
+  const token = await (await makeSigner()).sign(claims(team));
+  const env = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD };
+  await assert.rejects(getUser(req("https://trips.example.com/api/me", null, { Cookie: `CF_Authorization=${token}` }), env, {}, signer.fetchKeys), /signature/);
 });
