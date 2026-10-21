@@ -1,0 +1,72 @@
+name: Test and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once; a newer push waits for the running one.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy:
+    # Only merges to main reach production; pull requests just run the tests.
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+      ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Check settings
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID D1_DATABASE_ID ACCESS_TEAM_DOMAIN ACCESS_AUD; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets/variables:$missing (see README, 'Automatic deploys')"
+            exit 1
+          fi
+
+      # wrangler.jsonc in the repo holds placeholders; fill in this account's values.
+      - name: Fill in wrangler.jsonc
+        run: |
+          sed -i \
+            -e "s/00000000-0000-0000-0000-000000000000/$D1_DATABASE_ID/" \
+            -e "s/\"ACCESS_TEAM_DOMAIN\": \"\"/\"ACCESS_TEAM_DOMAIN\": \"$ACCESS_TEAM_DOMAIN\"/" \
+            -e "s/\"ACCESS_AUD\": \"\"/\"ACCESS_AUD\": \"$ACCESS_AUD\"/" \
+            wrangler.jsonc
+          grep -q "$D1_DATABASE_ID" wrangler.jsonc
+          grep -q "\"ACCESS_AUD\": \"$ACCESS_AUD\"" wrangler.jsonc
+
+      # Migrations run first so the new code never meets an old schema.
+      - name: Apply D1 migrations
+        run: npm run db:migrate:remote
+
+      - name: Deploy
+        run: npm run deploy

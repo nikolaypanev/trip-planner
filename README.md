@@ -30,11 +30,30 @@ You need a free Cloudflare account.
 6. **Tell the app about it:** put those two values in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`) and run `npm run deploy` again.
 7. **Choose who gets in:** on the same page click **Manage Cloudflare Access** and add each person's email. They sign in with a one-time code sent to that email. The free plan covers up to 50 people.
 
-## Later changes
+## Automatic deploys
 
-- New table or column: add a numbered file to `migrations/`, then `npm run db:migrate:remote`.
-- After pulling an update that adds a migration (like `0002_sight_details.sql`), run `npm run db:migrate:remote` before `npm run deploy`.
-- Code changes: `npm run deploy`.
+Every merge to `main` is tested, migrated and deployed by GitHub Actions (`.github/workflows/deploy.yml`). Pull requests only run the tests. You can also start a deploy by hand under *Actions → Test and deploy → Run workflow*.
+
+One-time setup, in the GitHub repo under *Settings → Secrets and variables → Actions*:
+
+- **Secrets**
+  - `CLOUDFLARE_API_TOKEN`: create it in the Cloudflare dashboard under *My Profile → API Tokens → Create Token → Create Custom Token* with these account permissions: **Workers Scripts: Edit** and **D1: Edit**. Limit it to your account.
+  - `CLOUDFLARE_ACCOUNT_ID`: shown on the right of *Workers & Pages → Overview*, or via `npx wrangler whoami`.
+- **Variables** (the same values you put in your local `wrangler.jsonc`)
+  - `D1_DATABASE_ID`
+  - `ACCESS_TEAM_DOMAIN`
+  - `ACCESS_AUD`
+
+The committed `wrangler.jsonc` keeps placeholders; the workflow fills these in before deploying.
+
+### Database changes
+
+Add a numbered file to `migrations/` in the same pull request as the code that needs it. On merge, the workflow applies new migrations first and deploys the code second, so the new code never runs against the old schema. Two rules keep that safe:
+
+- **Additive only.** For a moment the old code runs against the new schema, so add tables and columns (with defaults or nullable) rather than renaming or dropping them. To remove something, stop using it in one release and drop it in a later one.
+- **Never edit a migration that has already been applied.** D1 records which files ran and won't re-run a changed one; fix mistakes with a new numbered file.
+
+If a migration fails, the deploy is skipped and production keeps running the previous code.
 
 ## Troubleshooting
 
