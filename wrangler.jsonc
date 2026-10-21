@@ -9,21 +9,27 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "trip-planner",
       // Replace with the id printed by `npx wrangler d1 create trip-planner`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
+      "database_id": "5645169d-076e-4b08-90f1-6b4122d9df6d",
+      "migrations_dir": "migrations",
+    },
+    {
+      "binding": "trip_planner",
+      "database_name": "trip-planner",
+      "database_id": "5645169d-076e-4b08-90f1-6b4122d9df6d",
+      "remote": true,
+    },
   ],
   "vars": {
     // Your Zero Trust team domain, e.g. "myteam.cloudflareaccess.com".
-    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_TEAM_DOMAIN": "silent-bush-262c.cloudflareaccess.com",
     // The "Application Audience (AUD) Tag" of the Access application.
-    "ACCESS_AUD": ""
-  }
+    "ACCESS_AUD": "0e9c74be725cc5b48222d0bb1f30653905298a2db97bec0392a1259491979d68",
+  },
 }
